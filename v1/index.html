@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#FFFFFF">
+    <title>Catatan Keuangan</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+    <link rel="stylesheet" href="assets/css/style.css?v=1">
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="loader"></div></div>
+
+<div class="pin-lock hidden" id="pinLock">
+    <div class="pin-container">
+        <div class="pin-logo">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        </div>
+        <h2 class="pin-title">Masukkan PIN</h2>
+        <p class="pin-subtitle">Masuk untuk membuka kunci</p>
+        <div class="pin-display" id="pinDisplay">
+            <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+            <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+        </div>
+        <div class="pin-keypad" id="pinKeypad">
+            <button class="pin-key" data-key="1">1</button><button class="pin-key" data-key="2">2</button><button class="pin-key" data-key="3">3</button>
+            <button class="pin-key" data-key="4">4</button><button class="pin-key" data-key="5">5</button><button class="pin-key" data-key="6">6</button>
+            <button class="pin-key" data-key="7">7</button><button class="pin-key" data-key="8">8</button><button class="pin-key" data-key="9">9</button>
+            <button class="pin-key empty"></button><button class="pin-key" data-key="0">0</button><button class="pin-key delete" data-key="delete">⌫</button>
+        </div>
+    </div>
+</div>
+
+<div class="app">
+    <div class="top">
+        <div class="head">
+            <div><h2 id="appTitle">...</h2><p id="appSubtitle">...</p></div>
+            <img src="" alt="Profile" id="profileImg">
+        </div>
+        <div class="ctrl">
+            <select id="sel" class="sel" disabled><option>Loading...</option></select>
+            <button id="ref" class="btn-i"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+        </div>
+        <div class="tabs" id="nav">
+            <button class="tab active" data-t="v1">Laporan</button>
+            <button class="tab" data-t="v2">Tambah Transaksi</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <div id="v1" class="view active">
+            <div class="sum">
+                <div class="card"><span>Saldo ATM</span><b id="s1">-</b></div>
+                <div class="card"><span>Cash Pihak 1</span><b id="s2">-</b></div>
+                <div class="card"><span>Cash Pihak 2</span><b id="s3">-</b></div>
+            </div>
+            <div class="lh"><span>Riwayat Transaksi</span><span>Nominal</span></div>
+            <div id="ld" style="padding:16px;"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+            <div id="emp" class="emp">Belum ada data transaksi</div>
+            <ul id="lst" class="ls"></ul>
+        </div>
+
+        <div id="v2" class="view">
+            <div class="frm">
+                <form id="f">
+                    <div class="grp"><label class="lbl">Tanggal</label><input type="date" id="fd" class="inp"></div>
+                    <div class="grp"><label class="lbl">Keterangan</label><input type="text" id="fk" class="inp" placeholder="Cth: Beli Makan" autocomplete="off"></div>
+                    <div class="grp"><label class="lbl">Nominal</label><input type="text" inputmode="decimal" id="fn" class="inp" placeholder="0"></div>
+                    <div class="grid-2">
+                        <div class="grp" data-k="pihak">
+                            <label class="lbl">Pihak</label>
+                            <div class="togs" id="pihakContainer">
+                                </div>
+                            <input type="hidden" name="pihak">
+                        </div>
+                        <div class="grp" data-k="sumber">
+                            <label class="lbl">Sumber</label>
+                            <div class="togs"><button type="button" class="tg" data-v="ATM">ATM</button><button type="button" class="tg" data-v="CASH">CASH</button></div>
+                            <input type="hidden" name="sumber">
+                        </div>
+                    </div>
+                    <div class="grp" data-k="jenis">
+                        <label class="lbl">Jenis Transaksi</label>
+                        <div class="togs"><button type="button" class="tg" data-v="debit">Masuk (Debit)</button><button type="button" class="tg" data-v="kredit">Keluar (Kredit)</button></div>
+                        <input type="hidden" name="jenis">
+                    </div>
+                    <button type="submit" class="btn-s" id="bs">Simpan Transaksi</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<template id="t-row">
+    <li class="li">
+        <div class="l-l">
+            <div class="dt"><span class="day"></span><span class="d-txt"></span><span class="tm"></span></div>
+            <div class="desc"></div>
+            <div class="tags"><span class="tg-p"></span><span class="tg-s"></span></div>
+        </div>
+        <div class="l-r">
+            <div class="amt"></div>
+            <div class="act">
+                <button class="b-m b-e" data-a="e"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                <button class="b-m b-d" data-a="d"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+            </div>
+        </div>
+    </li>
+</template>
+
+<template id="t-del-card">
+    <div class="del-card">
+        <div class="del-row"><span class="del-label">Tanggal</span><span class="del-val del-date"></span></div>
+        <div class="del-row"><span class="del-label">Keterangan</span><span class="del-val del-desc"></span></div>
+        <div class="del-row"><span class="del-label">Info</span><span class="del-val del-meta"></span></div>
+        <div class="del-row"><span class="del-label">Nominal</span><span class="del-val del-amount"></span></div>
+    </div>
+</template>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="assets/js/script.js?v=1" defer></script>
+</body>
+</html>
