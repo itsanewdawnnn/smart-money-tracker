@@ -6,8 +6,8 @@
       document.getElementById("loadingOverlay").classList.add("hidden");
       Swal.fire({
          icon: "error",
-         title: "Konfigurasi Tidak Ditemukan",
-         text: "Parameter config hilang di URL",
+         title: "Gagal Terhubung",
+         text: "Parameter tidak valid",
          confirmButtonText: "OK",
          allowOutsideClick: !1
       });
@@ -117,7 +117,7 @@
             Swal.fire({
                icon: "error",
                title: "Gagal Terhubung",
-               text: "Koneksi bermasalah",
+               text: "Config tidak valid",
                confirmButtonText: "OK"
             });
             throw e;
