@@ -1,0 +1,477 @@
+// ===================== CONFIG =====================
+const SHEET_ID = 'DEPLOYMENT_ID';
+const SETTINGS_SHEET = '.Settings';
+
+const VALID_SUMBER = ['ATM', 'CASH'];
+const VALID_JENIS = ['debit', 'kredit'];
+
+// ===================== DO GET =====================
+function doGet(e) {
+ try {
+  const action = e.parameter.action;
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  // Mengambil pengaturan dari sheet .Settings
+  if (action === 'getOptions') {
+   return getOptions(ss);
+  }
+
+  // Mengambil daftar semua nama sheet
+  if (action === 'getSheets') {
+   const sheetNames = getAllSheetNames(ss);
+   return ContentService
+    .createTextOutput(JSON.stringify({ status: 'success', data: sheetNames }))
+    .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // Mengambil data dari sheet tertentu
+  if (action === 'getData') {
+   const sheetName = e.parameter.sheet;
+   if (!sheetName) {
+    return errorResponse('Parameter "sheet" (nama sheet) diperlukan.');
+   }
+
+   const sheet = ss.getSheetByName(sheetName);
+   if (!sheet) {
+    return errorResponse(`Sheet dengan nama "${sheetName}" tidak ditemukan.`);
+   }
+
+   // Header ada di baris 2, kolom A sampai K (11 kolom)
+   const headersRange = sheet.getRange('A2:K2').getValues();
+   const headers = headersRange[0].map(h => normalizeHeader(h));
+
+   const lastRow = sheet.getLastRow();
+
+   // Jika tidak ada data (hanya header dan saldo awal)
+   if (lastRow < 4) {
+    // Ambil saldo awal dari baris 3 (kolom I, J, K)
+    const saldoAwal = sheet.getRange('I3:K3').getValues()[0];
+    return ContentService.createTextOutput(JSON.stringify({
+     status: 'success',
+     data: [],
+     saldo: {
+      atm: saldoAwal[0] || 0,
+      cashPihak1: saldoAwal[1] || 0,
+      cashPihak2: saldoAwal[2] || 0
+     }
+    })).setMimeType(ContentService.MimeType.JSON);
+   }
+
+   // Ambil data dari baris 4 sampai akhir, kolom A-K (11 kolom)
+   const dataRange = sheet.getRange(4, 1, lastRow - 3, headers.length);
+   const rows = dataRange.getValues();
+
+   const result = rows.map(row => {
+    let obj = {};
+    headers.forEach((header, i) => {
+     if (i < headers.length) {
+      obj[header] = row[i] !== undefined ? row[i] : '';
+     }
+    });
+    return obj;
+   }).filter(row => row.tanggal !== '' && row.tanggal !== null);
+
+   // Ambil saldo terbaru dari baris terakhir (kolom I, J, K)
+   const saldoTerbaru = sheet.getRange(lastRow, 9, 1, 3).getValues()[0];
+
+   return ContentService.createTextOutput(JSON.stringify({
+    status: 'success',
+    data: result,
+    saldo: {
+     atm: saldoTerbaru[0] || 0,
+     cashPihak1: saldoTerbaru[1] || 0,
+     cashPihak2: saldoTerbaru[2] || 0
+    }
+   })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  return errorResponse('Aksi tidak valid untuk doGet.');
+
+ } catch (err) {
+  return errorResponse(err.message);
+ }
+}
+
+// ===================== DO POST =====================
+function doPost(e) {
+ try {
+  const data = JSON.parse(e.postData.contents || '{}');
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  // Handle SAVE OPTIONS action
+  if (data.action === 'saveOptions') {
+   return saveOptions(ss, data);
+  }
+
+  // Handle DELETE action
+  if (data.action === 'delete') {
+   return handleDelete(ss, data);
+  }
+
+  // Handle EDIT action
+  if (data.action === 'edit') {
+   return handleEdit(ss, data);
+  }
+
+  // Handle ADD transaction (default)
+  return handleAddTransaction(ss, data);
+
+ } catch (err) {
+  return errorResponse(`Terjadi error: ${err.message}`);
+ }
+}
+
+// ===================== GET OPTIONS =====================
+function getOptions(ss) {
+ try {
+  const settingsSheet = ss.getSheetByName(SETTINGS_SHEET);
+
+  if (!settingsSheet) {
+   return errorResponse(`Sheet "${SETTINGS_SHEET}" tidak ditemukan. Silakan buat sheet dengan nama tersebut.`);
+  }
+
+  // Ambil nilai dari Sheet .Settings
+  const photo = settingsSheet.getRange('B1').getValue() || '';
+  const title = settingsSheet.getRange('B2').getValue() || '';
+  const subtitle = settingsSheet.getRange('B3').getValue() || '';
+  const pin = settingsSheet.getRange('B4').getValue() || '';
+  
+  // Ambil Nama Pihak dari B5 dan C5
+  const pihak1 = settingsSheet.getRange('B5').getValue() || '';
+  const pihak2 = settingsSheet.getRange('C5').getValue() || '';
+
+  return ContentService.createTextOutput(JSON.stringify({
+   status: 'success',
+   data: {
+    title: title,
+    subtitle: subtitle,
+    pin: String(pin),
+    photo: photo,
+    pihak: [pihak1, pihak2]
+   }
+  })).setMimeType(ContentService.MimeType.JSON);
+
+ } catch (err) {
+  return errorResponse(`Error mengambil pengaturan: ${err.message}`);
+ }
+}
+
+// ===================== SAVE OPTIONS =====================
+function saveOptions(ss, data) {
+ try {
+  const { title, subtitle, pin, photo, pihak1, pihak2 } = data;
+
+  let settingsSheet = ss.getSheetByName(SETTINGS_SHEET);
+
+  // Jika sheet .Settings tidak ada, buat baru
+  if (!settingsSheet) {
+   settingsSheet = ss.insertSheet(SETTINGS_SHEET);
+   // Set header labels di kolom A
+   settingsSheet.getRange('A1').setValue('URL Foto Profil');
+   settingsSheet.getRange('A2').setValue('Judul');
+   settingsSheet.getRange('A3').setValue('Subjudul');
+   settingsSheet.getRange('A4').setValue('PIN (6 digit)');
+   settingsSheet.getRange('A5').setValue('Nama Pihak 1 & 2');
+  } else {
+   // Pastikan label A5 ada jika sheet sudah ada tapi lama
+   settingsSheet.getRange('A5').setValue('Nama Pihak 1 & 2');
+  }
+
+  // Simpan nilai
+  if (photo !== undefined) settingsSheet.getRange('B1').setValue(photo);
+  if (title !== undefined) settingsSheet.getRange('B2').setValue(title);
+  if (subtitle !== undefined) settingsSheet.getRange('B3').setValue(subtitle);
+  if (pin !== undefined) settingsSheet.getRange('B4').setValue(pin);
+  
+  // Simpan Nama Pihak (Pihak 1 di B5, Pihak 2 di C5)
+  if (pihak1 !== undefined) settingsSheet.getRange('B5').setValue(pihak1);
+  if (pihak2 !== undefined) settingsSheet.getRange('C5').setValue(pihak2);
+
+  return ContentService.createTextOutput(JSON.stringify({
+   status: 'success',
+   message: 'Pengaturan berhasil disimpan'
+  })).setMimeType(ContentService.MimeType.JSON);
+
+ } catch (err) {
+  return errorResponse(`Error menyimpan pengaturan: ${err.message}`);
+ }
+}
+
+// ===================== HANDLE DELETE =====================
+function handleDelete(ss, data) {
+ const { sheetName, rowNumber } = data;
+
+ if (!sheetName) return errorResponse('Nama sheet diperlukan.');
+ if (!rowNumber) return errorResponse('Nomor baris diperlukan.');
+
+ const sheet = ss.getSheetByName(sheetName);
+
+ if (!sheet) return errorResponse(`Sheet "${sheetName}" tidak ditemukan.`);
+
+ const lastRow = sheet.getLastRow();
+ 
+ // Jika tidak ada data sama sekali
+ if (lastRow < 4) return errorResponse('Tidak ada data untuk dihapus.');
+ 
+ const noColumn = sheet.getRange(4, 1, lastRow - 3, 1).getValues();
+
+ let targetRow = -1;
+ for (let i = 0; i < noColumn.length; i++) {
+  if (noColumn[i][0] == rowNumber) {
+   targetRow = i + 4;
+   break;
+  }
+ }
+
+ if (targetRow === -1) return errorResponse('Data tidak ditemukan.');
+
+ // Hapus baris fisik
+ sheet.deleteRow(targetRow);
+ 
+ // Tunggu sebentar untuk memastikan delete selesai
+ SpreadsheetApp.flush();
+ 
+ // Cek apakah masih ada data setelah delete
+ const newLastRow = sheet.getLastRow();
+ 
+ // Jika tidak ada data lagi (hanya tersisa header di baris 2 dan saldo awal di baris 3)
+ if (newLastRow <= 3) {
+  // Hapus SEMUA baris setelah baris 3
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > 3) {
+   sheet.deleteRows(4, maxRows - 3);
+  }
+  // Pastikan tidak ada formula tersisa
+  SpreadsheetApp.flush();
+ } else {
+  // Masih ada data, set ulang formula
+  setSheetFormulas(sheet);
+ }
+
+ return successResponse('Data berhasil dihapus');
+}
+
+// ===================== HANDLE EDIT =====================
+function handleEdit(ss, data) {
+ const { sheetName, rowNumber, tanggal, keterangan, nominal, pihak, sumber, jenis, includeTime } = data;
+
+ if (!sheetName) return errorResponse('Nama sheet diperlukan.');
+ if (!rowNumber) return errorResponse('Nomor baris diperlukan.');
+
+ const sheet = ss.getSheetByName(sheetName);
+ if (!sheet) return errorResponse(`Sheet "${sheetName}" tidak ditemukan.`);
+
+ // Validasi Dinamis Pihak
+ const validPihakList = getDynamicPihak(ss);
+ 
+ // Normalisasi input
+ const validatedSumber = (sumber || '').toUpperCase();
+ const validatedPihak = capitalize(pihak || '');
+ const validatedJenis = (jenis || '').toLowerCase();
+ const validatedNominal = parseInt(nominal, 10);
+
+ if (!VALID_SUMBER.includes(validatedSumber)) {
+  return errorResponse(`Sumber tidak valid. Gunakan: ${VALID_SUMBER.join(', ')}`);
+ }
+ 
+ // Cek apakah pihak yang dikirim ada di list dinamis
+ if (!validPihakList.includes(validatedPihak)) {
+  return errorResponse(`Pihak tidak valid. Pilihan: ${validPihakList.join(', ')}`);
+ }
+
+ if (!VALID_JENIS.includes(validatedJenis)) {
+  return errorResponse(`Jenis tidak valid. Gunakan: ${VALID_JENIS.join(', ')}`);
+ }
+ if (isNaN(validatedNominal) || validatedNominal <= 0) {
+  return errorResponse(`Nominal tidak valid`);
+ }
+
+ // Cari baris
+ const lastRow = sheet.getLastRow();
+ const noColumn = sheet.getRange(4, 1, lastRow - 3, 1).getValues();
+ let targetRow = -1;
+ for (let i = 0; i < noColumn.length; i++) {
+  if (noColumn[i][0] == rowNumber) {
+   targetRow = i + 4;
+   break;
+  }
+ }
+
+ if (targetRow === -1) return errorResponse('Data tidak ditemukan.');
+
+ const debit = validatedJenis === 'debit' ? validatedNominal : '';
+ const kredit = validatedJenis === 'kredit' ? validatedNominal : '';
+
+ let jam = '';
+ if (includeTime === true) {
+  jam = Utilities.formatDate(new Date(), "Asia/Jakarta", "HH:mm:ss");
+ }
+
+ sheet.getRange(targetRow, 2).setValue(tanggal || '');
+ sheet.getRange(targetRow, 3).setValue(jam ? "'" + jam : '');
+ sheet.getRange(targetRow, 4).setValue(validatedSumber);
+ sheet.getRange(targetRow, 5).setValue(keterangan || '-');
+ sheet.getRange(targetRow, 6).setValue(validatedPihak);
+ sheet.getRange(targetRow, 7).setValue(debit);
+ sheet.getRange(targetRow, 8).setValue(kredit);
+
+ // Pastikan formula ada dan update
+ setSheetFormulas(sheet);
+
+ return successResponse('Data berhasil diupdate');
+}
+
+// ===================== HANDLE ADD TRANSACTION =====================
+function handleAddTransaction(ss, data) {
+ let { tanggal, sumber, keterangan, pihak, jenis, nominal, sheetName, includeTime } = data;
+
+ if (!sheetName) return errorResponse('Nama sheet diperlukan.');
+
+ // Validasi Dinamis Pihak
+ const validPihakList = getDynamicPihak(ss);
+
+ tanggal = tanggal ? tanggal : Utilities.formatDate(new Date(), "Asia/Jakarta", "dd/MM/yyyy");
+ 
+ let jam = '';
+ if (includeTime === true) {
+  jam = Utilities.formatDate(new Date(), "Asia/Jakarta", "HH:mm:ss");
+ }
+
+ sumber = (sumber || '').toUpperCase();
+ pihak = capitalize(pihak || '');
+ jenis = (jenis || '').toLowerCase();
+ nominal = parseInt(nominal, 10);
+
+ if (!VALID_SUMBER.includes(sumber)) {
+  return errorResponse(`Sumber tidak valid. Gunakan: ${VALID_SUMBER.join(', ')}`);
+ }
+ 
+ if (!validPihakList.includes(pihak)) {
+  return errorResponse(`Pihak tidak valid. Pilihan: ${validPihakList.join(', ')}`);
+ }
+
+ if (!VALID_JENIS.includes(jenis)) {
+  return errorResponse(`Jenis tidak valid. Gunakan: ${VALID_JENIS.join(', ')}`);
+ }
+ if (isNaN(nominal) || nominal <= 0) {
+  return errorResponse(`Nominal tidak valid`);
+ }
+
+ const debit = jenis === 'debit' ? nominal : '';
+ const kredit = jenis === 'kredit' ? nominal : '';
+
+ const sheet = ss.getSheetByName(sheetName);
+ if (!sheet) return errorResponse(`Sheet "${sheetName}" tidak ditemukan.`);
+
+ // Cek apakah ini data pertama
+ const lastRow = sheet.getLastRow();
+ const isFirstData = lastRow < 4;
+ 
+ // Jika data pertama, pastikan ada baris 4
+ if (isFirstData) {
+  // Tambahkan baris baru di posisi 4
+  sheet.insertRowAfter(3);
+ }
+
+ // Tulis data ke baris 4 (untuk data pertama) atau append untuk data berikutnya
+ if (isFirstData) {
+  sheet.getRange(4, 2, 1, 7).setValues([[
+   tanggal,
+   jam ? "'" + jam : '',
+   sumber,
+   keterangan || '-',
+   pihak,
+   debit,
+   kredit
+  ]]);
+ } else {
+  sheet.appendRow([
+   null,
+   tanggal,
+   jam ? "'" + jam : '',
+   sumber,
+   keterangan || '-',
+   pihak,
+   debit,
+   kredit
+  ]);
+ }
+
+ // Set Formula
+ setSheetFormulas(sheet);
+
+ return successResponse('Data berhasil disimpan');
+}
+
+// ===================== HELPER: SET FORMULAS =====================
+function setSheetFormulas(sheet) {
+ const lastRow = sheet.getLastRow();
+ 
+ // Jika tidak ada data sama sekali (hanya header dan saldo awal)
+ if (lastRow < 4) {
+  return; // Tidak perlu set formula
+ }
+ 
+ // Rumus A4 - hanya sampai lastRow untuk menghindari baris kosong
+ const formulaA4 = '=ARRAYFORMULA(IF(B4:B=""; ""; ROW(B4:B) - 2))';
+ 
+ // Rumus I4
+ const formulaI4 = '=ARRAYFORMULA(IF(B4:B=""; ""; MAP(ROW(B4:B); LAMBDA(r; I$3 + IFERROR(SUMIFS(INDIRECT("G4:G"&r); INDIRECT("D4:D"&r); "ATM"); 0) - IFERROR(SUMIFS(INDIRECT("H4:H"&r); INDIRECT("D4:D"&r); "ATM"); 0)))))';
+
+ // Rumus J4
+ const formulaJ4 = '=ARRAYFORMULA(IF(B4:B=""; ""; MAP(ROW(B4:B); LAMBDA(r; J$3 + IFERROR(SUMIFS(INDIRECT("G4:G"&r); INDIRECT("D4:D"&r); "CASH"; INDIRECT("F4:F"&r); \'.Settings\'!B5); 0) - IFERROR(SUMIFS(INDIRECT("H4:H"&r); INDIRECT("D4:D"&r); "CASH"; INDIRECT("F4:F"&r); \'.Settings\'!B5); 0)))))';
+
+ // Rumus K4
+ const formulaK4 = '=ARRAYFORMULA(IF(B4:B=""; ""; MAP(ROW(B4:B); LAMBDA(r; K$3 + IFERROR(SUMIFS(INDIRECT("G4:G"&r); INDIRECT("D4:D"&r); "CASH"; INDIRECT("F4:F"&r); \'.Settings\'!C5); 0) - IFERROR(SUMIFS(INDIRECT("H4:H"&r); INDIRECT("D4:D"&r); "CASH"; INDIRECT("F4:F"&r); \'.Settings\'!C5); 0)))))';
+
+ sheet.getRange('A4').setFormula(formulaA4);
+ sheet.getRange('I4').setFormula(formulaI4);
+ sheet.getRange('J4').setFormula(formulaJ4);
+ sheet.getRange('K4').setFormula(formulaK4);
+}
+
+// ===================== HELPER: DYNAMIC PIHAK =====================
+function getDynamicPihak(ss) {
+ const settingsSheet = ss.getSheetByName(SETTINGS_SHEET);
+ 
+ // Default jika sheet setting belum dibuat sama sekali
+ if (!settingsSheet) return ['Pihak 1', 'Pihak 2'];
+
+ // Ambil B5 dan C5
+ const p1 = settingsSheet.getRange('B5').getValue();
+ const p2 = settingsSheet.getRange('C5').getValue();
+
+ const list = [];
+ if (p1) list.push(capitalize(String(p1)));
+ if (p2) list.push(capitalize(String(p2)));
+
+ // Default jika tidak ada nilai
+ return list.length > 0 ? list : ['Pihak 1', 'Pihak 2'];
+}
+
+// ===================== HELPER: UTILS =====================
+function normalizeHeader(str) {
+ return String(str).trim().toLowerCase();
+}
+
+function getAllSheetNames(spreadsheet) {
+ const sheets = spreadsheet.getSheets();
+ return sheets.map(sheet => sheet.getName());
+}
+
+function capitalize(str) {
+ if (!str) return '';
+ return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+function errorResponse(msg) {
+ return ContentService
+  .createTextOutput(JSON.stringify({ status: 'error', message: msg }))
+  .setMimeType(ContentService.MimeType.JSON);
+}
+
+function successResponse(msg) {
+ return ContentService
+  .createTextOutput(JSON.stringify({ status: 'success', message: msg }))
+  .setMimeType(ContentService.MimeType.JSON);
+}
